@@ -15,8 +15,16 @@ extern "C" {
 }
 
 static void (*logger)(const char *line);
+static int (*patch_hook)(pid_t pid, uintptr_t address, size_t length,
+                         const uint8_t *original);
 
 void kstuff_set_logger(void (*sink)(const char *line)) { logger = sink; }
+
+void kstuff_set_patch_hook(int (*hook)(pid_t pid, uintptr_t address,
+                                       size_t length,
+                                       const uint8_t *original)) {
+  patch_hook = hook;
+}
 
 void kstuff_log(const char *format, ...) {
   int saved = errno;
@@ -77,7 +85,18 @@ int kstuff_patch_prepare(pid_t pid, kstuff_patch *patch) {
 
   memset(patch->original, 0, sizeof(patch->original));
 
-  return pt_copyout(pid, patch->address, patch->original, patch->length);
+  if (pt_copyout(pid, patch->address, patch->original, patch->length))
+    return -1;
+
+  if (patch_hook &&
+      patch_hook(pid, patch->address, patch->length, patch->original)) {
+    if (!errno)
+      errno = EIO;
+
+    return -1;
+  }
+
+  return 0;
 }
 
 int kstuff_patch_commit(pid_t pid, kstuff_patch *patch) {

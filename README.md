@@ -19,11 +19,13 @@ Installs the FSELF/FPKG kernel hooks and kernel patches, patches SceShellCore so
 #include "kstuff.h"
 
 void kstuff_set_logger(void (*sink)(const char *line));
+void kstuff_set_patch_hook(int (*hook)(pid_t pid, uintptr_t address,
+                                       size_t length, const uint8_t *original));
 int kstuff_apply(void);
 int kstuff_reapply_shellcore(void);
 ```
 
-`kstuff_set_logger` is optional; without it, messages go to klog. `kstuff_apply` returns non-zero with `errno` set when something was skipped. The static library is meant to be linked together with [lib-ps-ptrace](https://github.com/ItsJokerZz/lib-ps-ptrace).
+`kstuff_set_logger` is optional; without it, messages go to klog. `kstuff_set_patch_hook` is optional too: the hook is called with the address and original bytes of every process patch just before it is written, and a non-zero return cancels that patch. `kstuff_apply` returns non-zero with `errno` set when something was skipped. The static library is meant to be linked together with [lib-ps-ptrace](https://github.com/ItsJokerZz/lib-ps-ptrace).
 
 ## Building
 
