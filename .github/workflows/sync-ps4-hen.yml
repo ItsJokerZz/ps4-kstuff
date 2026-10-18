@@ -1,0 +1,53 @@
+name: Sync ps4-hen
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull the ps4-hen headers and offset tables
+        run: ./update.sh
+
+      - name: Check the kernel payload builds
+        id: kernel
+        continue-on-error: true
+        run: make kernel
+
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KERNEL_BUILD: ${{ steps.kernel.outcome }}
+        run: |
+          git diff --quiet -- include source/firmware_table.inc source/remoteplay_table.inc && exit 0
+
+          branch=sync-ps4-hen
+          old=$(git show HEAD:UPSTREAM | sed -n 2p)
+          new=$(sed -n 2p UPSTREAM)
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -am "Sync ps4-hen to ${new:0:12}"
+          git push --force origin "$branch"
+
+          body="ps4-hen moved from ${old:0:12} to ${new:0:12}: https://github.com/Scene-Collective/ps4-hen/compare/${old}...${new}
+
+          The helper headers in include/ and the firmware and Remote Play tables in source/ were regenerated from it. Kernel payload build: ${KERNEL_BUILD}.
+
+          Not ported automatically: code changes in ps4-hen's kpayload/source (fself.c, fpkg.c, patch.c). For a new firmware, also check menu_jump in source/remoteplay.cpp and patch_set in source/shellcore.cpp."
+
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$branch" --title "Sync ps4-hen to ${new:0:12}" --body "$body"
+          else
+            gh pr edit "$branch" --title "Sync ps4-hen to ${new:0:12}" --body "$body"
+          fi
