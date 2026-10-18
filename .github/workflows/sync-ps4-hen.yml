@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pull the ps4-hen headers and offset tables
-        run: ./update.sh
+        run: sh update.sh
 
       - name: Check the kernel payload builds
         id: kernel

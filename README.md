@@ -43,8 +43,8 @@ make PTRACE_DIR=../lib-ps-ptrace BUILD=build
 ## Syncing with ps4-hen
 
 ```sh
-./update.sh            # ps4-hen HEAD
-./update.sh <ref>      # any branch, tag or commit of ps4-hen
+sh update.sh            # ps4-hen HEAD
+sh update.sh <ref>      # any branch, tag or commit of ps4-hen
 ```
 
 The script fetches that revision, overwrites `include/` with the listed upstream files, regenerates the two `source/*_table.inc` files (Python 3, standard library only) and rewrites `UPSTREAM`. Review the diff and commit it.
