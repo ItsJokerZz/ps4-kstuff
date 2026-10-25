@@ -25,12 +25,23 @@ git -C "$tmp" fetch -q --depth 1 "$UPSTREAM_URL" "$ref"
 git -C "$tmp" -c core.autocrlf=false checkout -q FETCH_HEAD
 commit=$(git -C "$tmp" rev-parse HEAD)
 
-mkdir -p include
+stage="$tmp/stage"
+mkdir -p "$stage/include" "$stage/source"
+
 for f in $FILES; do
-    git -C "$tmp" show "$commit:$UPSTREAM_DIR/$f" > "include/$f"
+    git -C "$tmp" show "$commit:$UPSTREAM_DIR/$f" > "$stage/include/$f"
 done
 
-"$python" tools/generate.py "$tmp"
+"$python" tools/generate.py "$tmp" "$stage"
+
+mkdir -p include
+for f in $FILES; do
+    cp "$stage/include/$f" "include/$f"
+done
+
+cp "$stage/source/firmware_table.inc" source/firmware_table.inc
+cp "$stage/source/remoteplay_table.inc" source/remoteplay_table.inc
+cp "$stage/source/exploit_fixes_table.inc" source/exploit_fixes_table.inc
 
 printf '%s\n%s\n' "$UPSTREAM_URL" "$commit" > UPSTREAM
 echo "synced with $commit"

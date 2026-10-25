@@ -43,7 +43,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 $(GEN): $(KERNEL_BIN)
 	@mkdir -p $(dir $@)
 	xxd -i -n kstuff_kernel $< > $@
-$(OBJ)/source/fpkg.cpp.o: $(GEN)
+$(OBJ)/source/kpayload.cpp.o: $(GEN)
 $(OBJ)/source/kernel_exec.c.o: CFLAGS += -mno-red-zone -mno-sse -mno-mmx -fno-stack-protector -fno-builtin
 $(OBJ)/%.c.o: %.c
 	@mkdir -p $(dir $@)

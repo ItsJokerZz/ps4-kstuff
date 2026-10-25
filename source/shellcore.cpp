@@ -1,5 +1,6 @@
 #include "firmware.h"
 #include "kstuff.h"
+#include "patches.h"
 #include "support.h"
 #include <cerrno>
 #include <cstdio>

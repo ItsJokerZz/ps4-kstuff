@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define KSTUFF_MAGIC UINT64_C(0x315546465554534b)
@@ -61,6 +62,12 @@ struct kstuff_call_site {
 struct kstuff_kernel_patch {
   uint32_t offset;
   uint8_t bytes[3];
+};
+
+struct kstuff_exploit_patch {
+  uint32_t offset;
+  uint8_t length;
+  uint8_t bytes[16];
 };
 
 struct kstuff_firmware {

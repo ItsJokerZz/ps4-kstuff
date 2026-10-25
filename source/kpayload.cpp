@@ -1,6 +1,7 @@
 #include "firmware.h"
 #include "kstuff.h"
 #include "kstuff_kernel.h"
+#include "patches.h"
 #include "support.h"
 #include <cerrno>
 #include <cstring>
@@ -10,9 +11,6 @@
 
 extern "C" int kstuff_kernel_exec(void *, void *);
 extern "C" int kexec(int (*)(void *, void *), ...);
-int kstuff_check_shellcore(const kstuff_firmware &);
-int kstuff_patch_shellcore(const kstuff_firmware &);
-void kstuff_remote_play(uint32_t version);
 
 static uint64_t image_hash(const uint8_t *data, size_t size) {
   uint64_t hash = UINT64_C(14695981039346656037);
@@ -163,7 +161,7 @@ static int resident_storage(uintptr_t base, uintptr_t &destination) {
   return 0;
 }
 
-static int install_kernel(uintptr_t base, const kstuff_firmware &fw) {
+int kstuff_install_kernel_payload(uintptr_t base, const kstuff_firmware &fw) {
   uintptr_t destination = 0;
 
   if (resident_storage(base, destination))
@@ -304,59 +302,3 @@ static int install_kernel(uintptr_t base, const kstuff_firmware &fw) {
   return 0;
 }
 
-int kstuff_apply() {
-  uint32_t firmware = kernel_get_fw_version();
-  const auto *fw = kstuff_firmware_for(firmware);
-  uintptr_t base = KERNEL_ADDRESS_IMAGE_BASE;
-
-  if (!fw || (base >> 48) != 0xffff) {
-    kstuff_log("[Kstuff] Unsupported firmware %#x; patches left unchanged\n",
-               firmware);
-    errno = ENOTSUP;
-    return -1;
-  }
-
-  kstuff_log("[Kstuff] Preparing PS4HEN patches for firmware %u.%02u\n",
-             fw->version / 100, fw->version % 100);
-
-  if (kstuff_check_shellcore(*fw)) {
-    int error = errno;
-
-    kstuff_log(
-        "[Kstuff] ShellCore does not match the %u.%02u table; kernel and "
-        "package patches skipped\n",
-        fw->version / 100, fw->version % 100);
-    errno = error;
-
-    return -1;
-  }
-
-  int error = 0;
-
-  if (install_kernel(base, *fw)) {
-    error = errno ? errno : EIO;
-    kstuff_log("[Kstuff] Kernel FSELF/FPKG hooks skipped: errno=%d (%s)\n",
-               error, strerror(error));
-  }
-
-  if (kstuff_patch_shellcore(*fw)) {
-    int failed = errno ? errno : EIO;
-
-    kstuff_log("[Kstuff] ShellCore patches skipped: errno=%d (%s)\n", failed,
-               strerror(failed));
-
-    if (!error)
-      error = failed;
-  }
-
-  kstuff_remote_play(fw->version);
-
-  if (error) {
-    errno = error;
-    return -1;
-  }
-
-  kstuff_log("[Kstuff] FSELF/FPKG and package-version patches ready\n");
-
-  return 0;
-}

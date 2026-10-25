@@ -2,7 +2,7 @@ name: Sync ps4-hen
 
 on:
   schedule:
-    - cron: "17 4 * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,36 +15,64 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pull the ps4-hen headers and offset tables
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Pull ps4-hen headers, offsets, and exploit patches
         run: sh update.sh
 
-      - name: Check the kernel payload builds
-        id: kernel
-        continue-on-error: true
-        run: make kernel
+      - name: Install PS4 payload toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 unzip
+          curl --fail --location --retry 3 \
+            https://github.com/ps4-payload-dev/sdk/releases/latest/download/ps4-payload-sdk.zip \
+            --output "$RUNNER_TEMP/ps4-payload-sdk.zip"
+          unzip -q "$RUNNER_TEMP/ps4-payload-sdk.zip" -d "$RUNNER_TEMP"
+          echo "PS4_PAYLOAD_SDK=$RUNNER_TEMP/ps4-payload-sdk" >> "$GITHUB_ENV"
+
+      - name: Get ptrace headers
+        run: git clone --depth 1 https://github.com/ItsJokerZz/lib-ps-ptrace.git "$RUNNER_TEMP/lib-ps-ptrace"
+
+      - name: Build the full payload library and kernel payload
+        run: make PTRACE_DIR="$RUNNER_TEMP/lib-ps-ptrace" BUILD="$RUNNER_TEMP/build"
 
       - name: Open a pull request
         env:
           GH_TOKEN: ${{ github.token }}
-          KERNEL_BUILD: ${{ steps.kernel.outcome }}
         run: |
-          git diff --quiet -- include source/firmware_table.inc source/remoteplay_table.inc && exit 0
+          git diff --quiet -- include source/firmware_table.inc source/remoteplay_table.inc source/exploit_fixes_table.inc UPSTREAM && exit 0
 
           branch=sync-ps4-hen
           old=$(git show HEAD:UPSTREAM | sed -n 2p)
           new=$(sed -n 2p UPSTREAM)
+          bot_email=41898282+github-actions[bot]@users.noreply.github.com
 
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "$bot_email"
           git checkout -B "$branch"
-          git commit -am "Sync ps4-hen to ${new:0:12}"
-          git push --force origin "$branch"
+          git add include source/firmware_table.inc source/remoteplay_table.inc source/exploit_fixes_table.inc UPSTREAM
+          git commit -m "Sync ps4-hen to ${new:0:12}"
+
+          remote_tip=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+          if [ -n "$remote_tip" ]; then
+            git fetch origin "$branch"
+            remote_email=$(git show -s --format=%ae FETCH_HEAD)
+            if [ "$remote_email" != "$bot_email" ]; then
+              echo "Refusing to overwrite $branch: its tip is not authored by github-actions[bot]" >&2
+              exit 1
+            fi
+            git push --force-with-lease="refs/heads/$branch:$remote_tip" origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
 
           body="ps4-hen moved from ${old:0:12} to ${new:0:12}: https://github.com/Scene-Collective/ps4-hen/compare/${old}...${new}
 
-          The helper headers in include/ and the firmware and Remote Play tables in source/ were regenerated from it. Kernel payload build: ${KERNEL_BUILD}.
+          The helper headers, firmware and Remote Play tables, and all firmware-specific installer exploit_fixes() patch records were regenerated from ps4-hen. The complete payload library and kernel payload built successfully before this PR was updated.
 
-          Not ported automatically: code changes in ps4-hen's kpayload/source (fself.c, fpkg.c, patch.c). For a new firmware, also check menu_jump in source/remoteplay.cpp and patch_set in source/shellcore.cpp."
+          Review the linked upstream diff for runtime-code changes. Changes to ps4-hen's kpayload/source (including fself.c, fpkg.c, and patch.c) are surfaced by this PR but are not blindly copied into kstuff. New firmware support can also require manual updates to menu_jump in source/remoteplay.cpp and patch_set in source/shellcore.cpp. The generator stops without updating files if imported offsets or exploit_fixes() records are missing or use unrecognized syntax."
 
           if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
             gh pr create --head "$branch" --title "Sync ps4-hen to ${new:0:12}" --body "$body"

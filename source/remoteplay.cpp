@@ -1,4 +1,5 @@
 #include "firmware.h"
+#include "patches.h"
 #include "support.h"
 #include <cerrno>
 #include <cstring>
@@ -21,6 +22,13 @@ static const remoteplay_offsets offsets[] = {
 struct remoteplay_patch {
   uint32_t offset;
   uint8_t size, original[5], mask[5], replacement[5];
+};
+
+enum remoteplay_patch_state {
+  REMOTEPLAY_PATCH_ERROR = -1,
+  REMOTEPLAY_PATCH_READY,
+  REMOTEPLAY_PATCH_APPLIED,
+  REMOTEPLAY_PATCH_FOREIGN,
 };
 
 static const char *menu_jump(uint32_t version) {
@@ -56,6 +64,23 @@ static remoteplay_patch make(uint32_t offset, uint8_t size,
   return p;
 }
 
+static remoteplay_patch_state check_patch(pid_t pid, uintptr_t base,
+                                          const remoteplay_patch &patch,
+                                          uint8_t *bytes) {
+  if (!patch.offset || patch.offset > 0x4000000 ||
+      pt_copyout(pid, base + patch.offset, bytes, patch.size))
+    return REMOTEPLAY_PATCH_ERROR;
+
+  if (!memcmp(bytes, patch.replacement, patch.size))
+    return REMOTEPLAY_PATCH_APPLIED;
+
+  for (unsigned i = 0; i < patch.size; ++i)
+    if ((bytes[i] & patch.mask[i]) != patch.original[i])
+      return REMOTEPLAY_PATCH_FOREIGN;
+
+  return REMOTEPLAY_PATCH_READY;
+}
+
 static unsigned apply(pid_t pid, uintptr_t base,
                       const remoteplay_patch *patches, unsigned count,
                       const char *where) {
@@ -70,24 +95,19 @@ static unsigned apply(pid_t pid, uintptr_t base,
   for (unsigned i = 0; i < count; ++i) {
     const remoteplay_patch &p = patches[i];
     uint8_t bytes[5]{};
+    remoteplay_patch_state state = check_patch(pid, base, p, bytes);
 
-    if (!p.offset || p.offset > 0x4000000 ||
-        pt_copyout(pid, base + p.offset, bytes, p.size)) {
+    if (state == REMOTEPLAY_PATCH_ERROR) {
       kstuff_log("[RemotePlay] %s +%#x cannot be read\n", where, p.offset);
       continue;
     }
 
-    if (!memcmp(bytes, p.replacement, p.size)) {
+    if (state == REMOTEPLAY_PATCH_APPLIED) {
       ++ready;
       continue;
     }
 
-    bool expected = true;
-
-    for (unsigned b = 0; b < p.size; ++b)
-      expected &= (bytes[b] & p.mask[b]) == p.original[b];
-
-    if (!expected) {
+    if (state == REMOTEPLAY_PATCH_FOREIGN) {
       kstuff_log(
           "[RemotePlay] Unexpected %s bytes at +%#x (%02x %02x %02x %02x "
           "%02x); unchanged\n",
