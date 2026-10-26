@@ -60,7 +60,15 @@ static bool is_foreign(const shellcore_patch &p, const uint8_t *bytes) {
   if (p.original[0] == 0xe8)
     return !memcmp(bytes, skipped_call, sizeof(skipped_call));
 
-  return p.size == 8 && !memcmp(bytes, p.replacement, 5);
+  if (p.size != 8)
+    return false;
+
+  const uint8_t padded_jump[] = {0x90, 0x90, 0x90, 0xe9,
+                                 static_cast<uint8_t>(p.replacement[1] - 3),
+                                 0x00, 0x00, 0x00};
+
+  return !memcmp(bytes, p.replacement, 5) ||
+         !memcmp(bytes, padded_jump, sizeof(padded_jump));
 }
 
 static int check(pid_t pid, uintptr_t base,
@@ -69,6 +77,8 @@ static int check(pid_t pid, uintptr_t base,
     errno = ESRCH;
     return -1;
   }
+
+  bool mismatch = false;
 
   for (const auto &p : patches) {
     uint8_t bytes[8];
@@ -94,10 +104,15 @@ static int check(pid_t pid, uintptr_t base,
         kstuff_log(
             "[Kstuff] Unexpected ShellCore bytes at +%#x:%s; unchanged\n",
             p.offset, hex);
-        errno = EINVAL;
+        mismatch = true;
 
-        return -1;
+        break;
       }
+  }
+
+  if (mismatch) {
+    errno = EINVAL;
+    return -1;
   }
 
   return 0;
